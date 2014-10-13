@@ -3,54 +3,52 @@ package pl.mwojterski.conf
 import java.nio.file.{Files, Path, Paths}
 
 import com.typesafe.config.{Config, ConfigFactory, ConfigValueType}
-import pl.mwojterski.groups.GroupDistributor
+import com.typesafe.scalalogging.StrictLogging
 
 import scala.collection.JavaConverters._
-import scala.collection.mutable
 
-class Settings private(config: Config) {
+class Settings private(config: Config) extends StrictLogging {
+
+  val port = config.getInt("port")
+
+  //todo: that poor validations for groups and files should be rewritten to use filter functions instead of nesting ifs
 
   val groups = {
     val groupConfig = Map.newBuilder[String, Int]
     for ((groupName, groupWeight) <- config.getConfig("groups").root.asScala) {
 
       if (groupWeight.valueType != ConfigValueType.NUMBER)
-        println(s"Ignoring group '$groupName' with invalid weight: '$groupWeight'") //todo: proper logging
+        logger warn s"Ignoring group '$groupName' with invalid weight: '$groupWeight'"
 
       else {
         val weight = groupWeight.unwrapped.asInstanceOf[Number].intValue()
         if (weight < 1)
-          println(s"Ignoring group '$groupName' with non positive weight: '$weight'")
+          logger warn s"Ignoring group '$groupName' with non positive weight: '$weight'"
 
         else groupConfig += groupName -> weight
       }
     }
 
-    GroupDistributor(groupConfig.result())
+    groupConfig.result()
   }
 
   val files = {
-    val uniquePaths = mutable.ListBuffer[Path]()
     val filesMapping = Map.newBuilder[String, Path]
 
     for ((alias, pathConfig) <- config.getConfig("files").root.asScala) {
       if (pathConfig.valueType != ConfigValueType.STRING)
-        println(s"File alias '$alias' have invalid value: '$pathConfig")
+        logger warn s"File alias '$alias' have invalid value: '$pathConfig"
 
       else {
-        var path = Paths.get(pathConfig.unwrapped.toString)
+        val path = Paths.get(pathConfig.unwrapped.toString).normalize
         if (!Files.isReadable(path))
-          println(s"Path '$path' is not accessible for reading")
+          logger warn s"Path '$path' is not accessible for reading"
 
-        else {
-          uniquePaths.find(Files.isSameFile(_, path)) match {
-            case Some(repeatedPath) => path = repeatedPath
-            case None => uniquePaths += path
-          }
-          filesMapping += alias -> path
-        }
+        else filesMapping += alias -> path
       }
     }
+
+    filesMapping.result()
   }
 }
 

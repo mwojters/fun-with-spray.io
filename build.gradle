@@ -4,7 +4,8 @@ apply plugin: 'idea'
 
 version = '1.0'
 
-mainClassName = 'pl.mwojterski.ShowUp'
+mainClassName = 'pl.mwojterski.Boot'
+applicationDefaultJvmArgs = ['-Dfile.encoding=UTF-8']
 
 repositories {
     mavenCentral()
@@ -19,10 +20,14 @@ dependencies {
 
     compile 'com.typesafe:config:1.2.1'
     compile 'com.typesafe.akka:akka-actor_2.11:2.3.2'
-//    compile 'com.typesafe.scala-logging:scala-logging-slf4j_2.11:2.1.2'
+    compile 'com.typesafe.akka:akka-slf4j_2.11:2.3.6'
+    compile 'com.typesafe.scala-logging:scala-logging_2.11:3.1.0'
 
     compile 'com.google.guava:guava:18.0'
 
-    testCompile 'org.scalatest:scalatest_2.11:2.2.1'
-    testCompile 'junit:junit:4.11'
+    runtime 'ch.qos.logback:logback-classic:1.1.2'
+
+// no tests :(
+//    testCompile 'org.scalatest:scalatest_2.11:2.2.1'
+//    testCompile 'junit:junit:4.11'
 }
