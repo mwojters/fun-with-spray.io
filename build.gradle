@@ -5,7 +5,7 @@ apply plugin: 'idea'
 version = '1.0'
 
 mainClassName = 'pl.mwojterski.Boot'
-applicationDefaultJvmArgs = ['-Dfile.encoding=UTF-8']
+applicationDefaultJvmArgs = ['-server', '-Dfile.encoding=UTF-8']
 
 repositories {
     mavenCentral()
