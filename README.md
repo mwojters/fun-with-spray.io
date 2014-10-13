@@ -36,10 +36,10 @@ It employs Akka actors to achieve asynchronous processing.
 
 Remarks
 -------
-File cache uses line character offset for faster line retrievals. It gives better performance than reading all lines
-from beginning of the file, nonetheless it is still very slow for big files. Retrieval could be improved dramatically
-by replacing character offset with binary offset. That way we could position file channel and do not decode all
-characters only to skip them.
+Implemented file cache uses line character offset for faster random line retrievals. It gives better performance than
+reading all lines from beginning of the file, nonetheless it is still very slow for big files. Retrieval could be 
+improved _dramatically_ by replacing character offset with binary offset. That way we could position file channel before
+read and do not decode all characters only to skip them.
 
 **Warning**: File caching requires ~16 bytes of memory per line. Therefore for huge files with short or empty
 lines cache will consume much amounts of memory. For example cache for 1 GiB file with 100 chars per line will consume
