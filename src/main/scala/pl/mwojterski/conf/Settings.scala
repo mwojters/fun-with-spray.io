@@ -41,7 +41,10 @@ class Settings private(config: Config) extends StrictLogging {
 
       else {
         val path = Paths.get(pathConfig.unwrapped.toString).normalize
-        if (!Files.isReadable(path))
+        if (!Files.isRegularFile(path))
+          logger warn s"Path '$path' is not a regular file"
+
+        else if (!Files.isReadable(path))
           logger warn s"Path '$path' is not accessible for reading"
 
         else filesMapping += alias -> path
