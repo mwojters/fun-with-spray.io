@@ -34,13 +34,5 @@ Implementation
 Application uses [Spray.io](http://spray.io/) implementation of HTTP based REST server.
 It employs Akka actors to achieve asynchronous processing.
 
-Remarks
--------
-Implemented file cache uses line character offset for faster random line retrievals. It gives better performance than
-reading all lines from beginning of the file, nonetheless it is still very slow for big files. Retrieval could be 
-improved _dramatically_ by replacing character offset with binary offset. That way we could position file channel before
-read and do not decode all characters only to skip them.
-
-**Warning**: File caching requires ~16 bytes of memory per line. Therefore for huge files with short or empty
-lines cache will consume much amounts of memory. For example cache for 1 GiB file with 100 chars per line will consume
-almost 11 MiB.
+**Warning**: File caching requires memory per each line of file. Therefore for huge files with short or empty
+lines cache will consume much amounts of memory.
