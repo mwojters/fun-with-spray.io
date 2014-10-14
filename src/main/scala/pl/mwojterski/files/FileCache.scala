@@ -1,35 +1,41 @@
 package pl.mwojterski.files
 
-import java.io.{BufferedReader, Reader}
+import java.io.BufferedReader
+import java.nio.channels.{Channels, SeekableByteChannel}
 import java.nio.charset.Charset
-import java.nio.file.{Files, Path}
+import java.nio.file.{Files, Path, StandardOpenOption}
+import java.nio.{ByteBuffer, CharBuffer}
 import java.util.concurrent.atomic.AtomicReference
 
+import com.google.common.base.Stopwatch
 import com.typesafe.scalalogging.StrictLogging
 import pl.mwojterski.files.FileCache.LineCache
 
 import scala.collection.immutable.IndexedSeq
 import scala.concurrent.{ExecutionContext, Future, Promise}
-import scala.io.Source
 import scala.ref.SoftReference
 
 private class FileCache(path: Path) extends StrictLogging {
   require(Files.isReadable(path), s"File '$path' cannot be read!")
-  logger info s"Created cache for '$path'"
 
   private val cachedLines: IndexedSeq[LineCache] = {
     val cacheBuilder = IndexedSeq.newBuilder[LineCache]
-    FileCache.foreachLineWithOffset(path) {
-      case (offset, line) => cacheBuilder += new LineCache(offset, line)
+    logTime(s"Building cache for '$path'") {
+      FileCache.foreachLineWithByteOffset(path) {
+        case (byteOffset, line) => cacheBuilder += new LineCache(byteOffset, line)
+      }
     }
     cacheBuilder.result()
   }
 
   val linesCount = cachedLines.size
 
+  logger info s"Created cache for '$path' with $linesCount lines"
+
+
   def getLine(lineNum: Int)(implicit ec: ExecutionContext): Future[String] = {
     require(1 <= lineNum && lineNum <= linesCount, s"Invalid lineNum=$lineNum, expected [1..$linesCount]")
-    logger debug s"Getting line $lineNum for '$path'"
+    logger trace s"Getting line $lineNum for '$path'"
 
     val lineCache = cachedLines(lineNum - 1)
     val cachedLine = lineCache.cachedLine
@@ -43,7 +49,7 @@ private class FileCache(path: Path) extends StrictLogging {
       if (promisedLine.isEmpty) {
         val promise = Promise[String]()
         if (cachedLine compareAndSet(softLine, new SoftReference(promise)))
-          promisedLine = Some(promise completeWith readLine(lineNum, lineCache.charOffset))
+          promisedLine = Some(promise completeWith readLine(lineNum, lineCache.byteOffset))
       }
 
     } while (promisedLine.isEmpty)
@@ -51,96 +57,98 @@ private class FileCache(path: Path) extends StrictLogging {
     promisedLine.get.future
   }
 
-  private def readLine(lineNum: Int, charOffset: Long)(implicit ec: ExecutionContext) =
+  private def readLine(lineNum: Int, byteOffset: Long)(implicit ec: ExecutionContext) =
     Future {
-      logger info s"Reading evicted line $lineNum from '$path'"
       // body is invoked in the future!
-      FileCache.withBufferedReader(path) { reader =>
-        reader skip charOffset
-        reader readLine()
+      logTime(s"Reading evicted line $lineNum from '$path'") {
+        FileCache.withReadableChannel(path) { channel =>
+          channel position byteOffset
+          val reader = Channels newReader(channel, Charset.defaultCharset.newDecoder, -1)
+          new BufferedReader(reader) readLine()
+        }
       }
     }
+
+  private def logTime[R](operation: => String)(op: => R): R = {
+    val stopwatch = Stopwatch.createStarted()
+    val result = op
+    stopwatch.stop()
+
+    logger info s"$operation completed in $stopwatch"
+    result
+  }
 }
 
 private object FileCache {
 
-  private class LineCache(val charOffset: Long, line: String) {
+  private class LineCache(val byteOffset: Long, line: String) {
     // Atomic to ensure only one worker refreshing cache
     // Soft to enable eviction when memory is needed
     // Promise to separate computation from creation
     val cachedLine = new AtomicReference(new SoftReference(Promise.successful(line)))
   }
 
-  private def foreachLineWithOffset[U](path: Path)(fun: ((Long, String)) => U) =
-    withBufferedReader(path) { reader =>
-      val countingIterator = new CountingIterator(reader)
-      val lines = new Source {
-        override val iter = countingIterator
-      }.getLines()
-
-      Iterator.continually(countingIterator.count).zip(lines).foreach(fun)
-    }
-
-  private def withBufferedReader[U](path: Path)(fun: BufferedReader => U) = {
-    val reader = Files newBufferedReader(path, Charset.defaultCharset)
-    try fun(reader)
-    finally reader.close()
+  private def withReadableChannel[U](path: Path)(process: SeekableByteChannel => U) = {
+    val channel = Files.newByteChannel(path, StandardOpenOption.READ)
+    try process(channel)
+    finally channel.close()
   }
 
-  private[this] class CountingIterator(reader: Reader) extends BufferedIterator[Char] {
-    private var buffer: Int = -1
-    private var counter: Long = 0
+  //todo: rewrite this ugly, imperative implementation
+  private def foreachLineWithByteOffset[U](path: Path)(fun: (Long, String) => U) =
+    FileCache.withReadableChannel(path) { channel =>
+      val byteBuffer = ByteBuffer.allocateDirect(8192)
+      val charBuffer = CharBuffer.allocate(1)
 
-    def count = counter
+      var byteOffset = 0L
+      val decoder = Charset.defaultCharset.newDecoder
 
-    override def head: Char =
-      if (hasNext) buffer.toChar
-      else Iterator.empty.next()
-
-    override def next(): Char =
-      try head
-      finally {
-        counter += 1
-        buffer = -1
+      val chars = Iterator.continually {
+        charBuffer.flip()
+        val nextChar = charBuffer.get()
+        charBuffer.flip()
+        nextChar
       }
 
-    override def hasNext: Boolean = {
-      if (buffer < 0)
-        buffer = reader.read()
+      val sb = new StringBuilder
 
-      buffer >= 0
+      var currentOffset = 0L
+      var nextOffset = 0L
+
+      var gotCr = false
+      var eof = false
+
+      do {
+        eof = channel.read(byteBuffer) == -1
+        byteBuffer.flip()
+
+        while (decoder.decode(byteBuffer, charBuffer, eof).isOverflow) {
+          val ch = chars.next()
+
+          val ln = ch == '\n'
+          val cr = ch == '\r'
+
+          if (ln || cr)
+            nextOffset = byteOffset + byteBuffer.position
+
+          if (ln || gotCr) {
+            fun(currentOffset, sb.result())
+
+            currentOffset = nextOffset
+            sb.clear()
+            gotCr = false
+          }
+
+          if (cr) gotCr = true
+
+          if (!cr && !ln) sb += ch
+        }
+
+        byteOffset += byteBuffer.position
+        byteBuffer.compact()
+
+      } while (!eof)
+
+      fun(currentOffset, sb.result())
     }
-  }
-
 }
-
-//object LineReadTest extends App {
-//  import java.nio.file.Paths
-//  import java.nio.channels.Channels
-//  import java.util.concurrent.TimeUnit
-//
-//  measure("no-pos") {
-//    Source.fromFile("C:/s1.log").getLines().toStream.last
-//  }
-//
-//  measure("char-pos") {
-//    val reader = Files.newBufferedReader(Paths.get("C:/s1.log"), Charset.defaultCharset)
-//    reader skip 29781839
-//    reader readLine()
-//  }
-//
-//  measure("byte-pos") {
-//    val channel = Files.newByteChannel(Paths.get("C:/s1.log"))
-//    channel position 0x1C6BB28
-//    val reader = new BufferedReader(Channels.newReader(channel, Charset.defaultCharset.displayName))
-//    reader readLine()
-//  }
-//
-//  def measure(name: String)(fun: => Any): Unit = {
-//    val start = System.nanoTime
-//    val result = fun
-//    val elapsed = System.nanoTime - start
-//    val millis = TimeUnit.NANOSECONDS.toMillis(elapsed)
-//    println(s"Function '$name' computed '$result' in: $elapsed nanos = $millis millis")
-//  }
-//}
