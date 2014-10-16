@@ -6,7 +6,7 @@ import pl.mwojterski.files.FileRepository
 import pl.mwojterski.groups.GroupDistributor
 import spray.routing.SimpleRoutingApp
 
-import scala.concurrent.duration.DurationInt
+import scala.concurrent.duration.Duration
 
 object Server extends App with SimpleRoutingApp with Router {
 
@@ -17,7 +17,7 @@ object Server extends App with SimpleRoutingApp with Router {
 
   // for startServer
   implicit val system = ActorSystem("simple-system")
-  implicit val bindTimeout = 5.minutes // need some time for cache building
+  implicit val bindTimeout = Duration.Inf
 
   startServer(interface = "localhost", port = settings.port)(routing)
 }

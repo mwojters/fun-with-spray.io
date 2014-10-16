@@ -27,7 +27,8 @@ Start application by invoking start script _showup_ from directory:
 
     build/install/showup/bin
 
-Default file encoding is set to UTF-8 and can be changed in start script.
+By default server will bind to port 8080 as defined in conf file.
+File encoding is set to UTF-8 and can be changed in build script.
 
 Implementation
 --------------

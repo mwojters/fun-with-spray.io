@@ -1,6 +1,5 @@
 package pl.mwojterski.rest
 
-import com.google.common.util.concurrent.MoreExecutors
 import pl.mwojterski.files.FileRepository
 import pl.mwojterski.files.FileRepository._
 import pl.mwojterski.groups.GroupDistributor
@@ -13,6 +12,9 @@ trait Router {
   protected def groupDistributor: GroupDistributor
   protected def fileRepository: FileRepository
 
+  // expose as protected to allow overriding with different executors
+  protected def fileRepoExecutor: ExecutionContext = ExecutionContext.global
+
   private val route = path("route") {
     parameters('id) { id =>
       complete(groupDistributor.groupFor(id))
@@ -23,10 +25,8 @@ trait Router {
     import spray.httpx.SprayJsonSupport.sprayJsonMarshaller
     import spray.json.DefaultJsonProtocol.{StringJsonFormat, mapFormat}
 
+    implicit val executor = fileRepoExecutor
     implicit val printer = spray.json.CompactPrinter // by default Json marshaller uses PrettyPrinter
-
-    // for fileRepository, direct executor (caller runs)
-    implicit val executor = ExecutionContext.fromExecutor(MoreExecutors.directExecutor)
 
     path("text") {
       get {

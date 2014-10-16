@@ -30,9 +30,9 @@ class RouterTest extends SpecificationWithJUnit with Specs2RouteTest with HttpSe
     }
 
     "return Json map for GET on /text with params" in new TestRouter {
-      implicit val ec = any[ExecutionContext]
       val lines = Map("demo1" -> Left("sampletext"), "demo2" -> Left("sampletext2"))
 
+      implicit val ec = any[ExecutionContext] // mockito ignores ordering of argument matchers
       fileRepository getFutureLines any[Map[String, String]] returns Future.successful(lines)
 
       Get("/text?demo1=14&demo2=12") ~> routing ~> check {
@@ -43,8 +43,8 @@ class RouterTest extends SpecificationWithJUnit with Specs2RouteTest with HttpSe
   }
 
   trait TestRouter extends Router with Scope {
-    val groupDistributor: GroupDistributor = mock[GroupDistributor]
-    val fileRepository: FileRepository = mock[FileRepository]
+    val groupDistributor = mock[GroupDistributor]
+    val fileRepository = mock[FileRepository]
   }
 
 }
