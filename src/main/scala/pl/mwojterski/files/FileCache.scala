@@ -23,7 +23,7 @@ private class FileCache(path: Path) {
     val cacheBuilder = IndexedSeq.newBuilder[LineCache]
     FileCache.logTime(s"Building cache for '$path'") {
       FileCache.foreachLineWithByteOffset(path) {
-        case (byteOffset, line) => cacheBuilder += new LineCache(byteOffset, line)
+        (byteOffset, line) => cacheBuilder += new LineCache(byteOffset, line)
       }
     }
     cacheBuilder.result()

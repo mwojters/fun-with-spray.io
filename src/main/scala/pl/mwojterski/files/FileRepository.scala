@@ -55,16 +55,17 @@ object FileRepository extends StrictLogging {
     // build caches for unique paths and reuse if different paths point to the same file
     val cachedPaths = mutable.Map[Path, FileCache]()
     files.values.toSet[Path].foreach { path =>
-      val cache = cachedPaths.keysIterator.find(Files.isSameFile(_, path)) match {
+      val optionalAliasPath = cachedPaths.keysIterator.find(Files.isSameFile(_, path))
+      val pathCache = optionalAliasPath match {
         case Some(aliasPath) => cachedPaths(aliasPath)
         case None => new FileCache(path)
       }
-      cachedPaths += path -> cache
+      cachedPaths += path -> pathCache
     }
 
     // link file aliases with caches
     val cachedFiles = files.transform {
-      case (file, path) => cachedPaths(path)
+      (file, path) => cachedPaths(path)
     }
     new FileRepository(cachedFiles)
   }
