@@ -3,7 +3,7 @@ package pl.mwojterski.files
 import java.io.BufferedReader
 import java.lang.ref.SoftReference
 import java.nio.channels.{Channels, SeekableByteChannel}
-import java.nio.charset.Charset
+import java.nio.charset.{CoderResult, Charset}
 import java.nio.file.{Files, Path, StandardOpenOption}
 import java.nio.{ByteBuffer, CharBuffer}
 import java.util.concurrent.atomic.AtomicReference
@@ -11,7 +11,6 @@ import java.util.concurrent.atomic.AtomicReference
 import com.google.common.base.Stopwatch
 import com.typesafe.scalalogging.StrictLogging
 import pl.mwojterski.files.FileCache.{LineCache, sharedLogger}
-
 
 import scala.collection.immutable.IndexedSeq
 import scala.concurrent.{ExecutionContext, Future, Promise}
@@ -105,13 +104,6 @@ private object FileCache extends StrictLogging {
       var byteOffset = 0L
       val decoder = Charset.defaultCharset.newDecoder
 
-      val chars = Iterator.continually {
-        charBuffer.flip()
-        val nextChar = charBuffer.get()
-        charBuffer.flip()
-        nextChar
-      }
-
       val sb = new StringBuilder
 
       var currentOffset = 0L
@@ -124,33 +116,44 @@ private object FileCache extends StrictLogging {
         eof = channel.read(byteBuffer) == -1
         byteBuffer.flip()
 
-        while (decoder.decode(byteBuffer, charBuffer, eof).isOverflow) {
-          val ch = chars.next()
+        var coderResult: CoderResult = null
+        do {
+          charBuffer.clear()
 
-          val ln = ch == '\n'
-          val cr = ch == '\r'
+          coderResult = decoder.decode(byteBuffer, charBuffer, eof)
+          charBuffer.flip()
 
-          if (ln || cr)
-            nextOffset = byteOffset + byteBuffer.position
+          if (charBuffer.hasRemaining) {
+            val ch = charBuffer.get()
 
-          if (ln || gotCr) {
-            fun(currentOffset, sb.result())
+            val ln = ch == '\n'
+            val cr = ch == '\r'
 
-            currentOffset = nextOffset
-            sb.clear()
-            gotCr = false
+            if (ln || cr)
+              nextOffset = byteOffset + byteBuffer.position
+
+            if (ln || gotCr) {
+              fun(currentOffset, sb.result())
+
+              currentOffset = nextOffset
+              sb.clear()
+              gotCr = false
+            }
+
+            if (cr)
+              gotCr = true
+
+            if (!cr && !ln)
+              sb += ch
           }
-
-          if (cr) gotCr = true
-
-          if (!cr && !ln) sb += ch
-        }
+        } while(coderResult.isOverflow)
 
         byteOffset += byteBuffer.position
         byteBuffer.compact()
 
       } while (!eof)
 
-      fun(currentOffset, sb.result())
+      if (sb.nonEmpty)
+        fun(currentOffset, sb.result())
     }
 }
