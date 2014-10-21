@@ -3,19 +3,21 @@ package pl.mwojterski.files
 import java.io.BufferedReader
 import java.lang.ref.SoftReference
 import java.nio.channels.{Channels, SeekableByteChannel}
-import java.nio.charset.{CoderResult, Charset}
+import java.nio.charset.Charset
 import java.nio.file.{Files, Path, StandardOpenOption}
-import java.nio.{ByteBuffer, CharBuffer}
 import java.util.concurrent.atomic.AtomicReference
 
+import com.google.common.annotations.VisibleForTesting
 import com.google.common.base.Stopwatch
 import com.typesafe.scalalogging.StrictLogging
 import pl.mwojterski.files.FileCache.{LineCache, sharedLogger}
 
 import scala.collection.immutable.IndexedSeq
 import scala.concurrent.{ExecutionContext, Future, Promise}
+import scala.io.Source
 
-private class FileCache(path: Path) {
+@VisibleForTesting
+private[files] class FileCache(path: Path) {
   require(Files.isReadable(path), s"File '$path' cannot be read!")
 
   private val cachedLines: IndexedSeq[LineCache] = {
@@ -68,6 +70,9 @@ private class FileCache(path: Path) {
         }
       }
     }
+
+  @VisibleForTesting
+  protected def evict() = cachedLines.foreach(_.cachedLine.get().clear())
 }
 
 private object FileCache extends StrictLogging {
@@ -95,65 +100,15 @@ private object FileCache extends StrictLogging {
     finally channel.close()
   }
 
-  //todo: rewrite this ugly, imperative implementation
   private def foreachLineWithByteOffset[U](path: Path)(fun: (Long, String) => U) =
-    FileCache.withReadableChannel(path) { channel =>
-      val byteBuffer = ByteBuffer.allocateDirect(8192)
-      val charBuffer = CharBuffer.allocate(1)
+    withReadableChannel(path) { channel =>
+      val reader = new CountingChannelReader(channel, Charset.defaultCharset)
+      val source = new Source {
+        override val iter: Iterator[Char] = reader
+      }
 
-      var byteOffset = 0L
-      val decoder = Charset.defaultCharset.newDecoder
-
-      val sb = new StringBuilder
-
-      var currentOffset = 0L
-      var nextOffset = 0L
-
-      var gotCr = false
-      var eof = false
-
-      do {
-        eof = channel.read(byteBuffer) == -1
-        byteBuffer.flip()
-
-        var coderResult: CoderResult = null
-        do {
-          charBuffer.clear()
-
-          coderResult = decoder.decode(byteBuffer, charBuffer, eof)
-          charBuffer.flip()
-
-          if (charBuffer.hasRemaining) {
-            val ch = charBuffer.get()
-
-            val ln = ch == '\n'
-            val cr = ch == '\r'
-
-            if (ln || cr)
-              nextOffset = byteOffset + byteBuffer.position
-
-            if (ln || gotCr) {
-              fun(currentOffset, sb.result())
-
-              currentOffset = nextOffset
-              sb.clear()
-              gotCr = false
-            }
-
-            if (cr)
-              gotCr = true
-
-            if (!cr && !ln)
-              sb += ch
-          }
-        } while(coderResult.isOverflow)
-
-        byteOffset += byteBuffer.position
-        byteBuffer.compact()
-
-      } while (!eof)
-
-      if (sb.nonEmpty)
-        fun(currentOffset, sb.result())
+      Iterator.continually(reader.count)
+        .zip(source.getLines())
+        .foreach(fun.tupled)
     }
 }

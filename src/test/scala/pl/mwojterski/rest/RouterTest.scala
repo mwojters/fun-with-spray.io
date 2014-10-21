@@ -15,7 +15,7 @@ class RouterTest extends SpecificationWithJUnit with Specs2RouteTest with HttpSe
 
   "Router" should {
 
-    "- return group for POST or GET on /route with id param" in new TestRouter {
+    "- return group for POST or GET on /route with id param" in new Fixture {
       val mockedGroup = "someGroup"
       val uri = "/route?id=2t03md9"
 
@@ -29,7 +29,7 @@ class RouterTest extends SpecificationWithJUnit with Specs2RouteTest with HttpSe
       Post(uri) ~> routing ~> expectedResponse
     }
 
-    "- return Json map for GET on /text with params" in new TestRouter {
+    "- return Json map for GET on /text with params" in new Fixture {
       val lines = Map("demo1" -> Left("sampletext"), "demo2" -> Left("sampletext2"))
 
       implicit val ec = any[ExecutionContext] // mockito ignores ordering of argument matchers
@@ -42,7 +42,7 @@ class RouterTest extends SpecificationWithJUnit with Specs2RouteTest with HttpSe
 
   }
 
-  trait TestRouter extends Router with Scope {
+  private trait Fixture extends Router with Scope {
     val groupDistributor = mock[GroupDistributor]
     val fileRepository = mock[FileRepository]
   }
