@@ -8,7 +8,7 @@ import java.nio.file.{Files, Path, StandardOpenOption}
 import java.util.concurrent.atomic.AtomicReference
 
 import com.google.common.annotations.VisibleForTesting
-import com.google.common.base.Stopwatch
+import com.google.common.base.{Charsets, Stopwatch}
 import com.typesafe.scalalogging.StrictLogging
 import pl.mwojterski.files.FileCache.{LineCache, sharedLogger}
 
@@ -43,20 +43,20 @@ private[files] class FileCache(path: Path) {
     val cachedLine = lineCache.cachedLine
 
     // acquire promise from cache or create new if cache was evicted
-    var promisedLine: Option[Promise[String]] = None
+    var promisedLine: Option[Promise[Array[Byte]]] = None
     do {
       val softLine = cachedLine.get
       promisedLine = Option(softLine.get)
 
       if (promisedLine.isEmpty) {
-        val promise = Promise[String]()
+        val promise = Promise[Array[Byte]]()
         if (cachedLine compareAndSet(softLine, new SoftReference(promise)))
           promisedLine = Some(promise completeWith readLine(lineNum, lineCache.byteOffset))
       }
 
     } while (promisedLine.isEmpty)
 
-    promisedLine.get.future
+    promisedLine.get.future.map(new String(_, Charsets.UTF_8))
   }
 
   private def readLine(lineNum: Int, byteOffset: Long)(implicit ec: ExecutionContext) =
@@ -66,7 +66,7 @@ private[files] class FileCache(path: Path) {
         FileCache.withReadableChannel(path) { channel =>
           channel position byteOffset
           val reader = Channels newReader(channel, Charset.defaultCharset.newDecoder, -1)
-          new BufferedReader(reader) readLine()
+          new BufferedReader(reader) readLine() getBytes Charsets.UTF_8
         }
       }
     }
@@ -82,7 +82,7 @@ private object FileCache extends StrictLogging {
     // Atomic to ensure only one worker refreshing cache
     // Soft to enable eviction when memory is needed
     // Promise to separate computation from creation
-    val cachedLine = new AtomicReference(new SoftReference(Promise.successful(line)))
+    val cachedLine = new AtomicReference(new SoftReference(Promise.successful(line.getBytes(Charsets.UTF_8))))
   }
 
   private def logTime[R](operation: => String)(op: => R): R = {
